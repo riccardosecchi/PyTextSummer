@@ -22,13 +22,6 @@ PyTextSummer è un'applicazione desktop professionale che trasforma documenti PD
 
 ---
 
-## 🎬 Screenshot
-
-L'interfaccia pulita e moderna ti permette di:
-- Trascinare file PDF direttamente nella finestra
-- Monitorare il progresso in tempo reale
-- Visualizzare statistiche dettagliate dell'elaborazione
-- Esportare direttamente su Overleaf
 
 ---
 
