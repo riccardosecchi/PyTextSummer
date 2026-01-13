@@ -284,10 +284,12 @@ class LangChainSummarizer:
     def _init_llm(self, api_key: str):
         """Initialize or reinitialize LLM with given API key."""
         os.environ["GOOGLE_API_KEY"] = api_key
+        # Gemini 2.0 Flash supporta fino a 65536 output tokens
+        # Usiamo il massimo per evitare troncamento dei riassunti lunghi
         self.llm = ChatGoogleGenerativeAI(
             model=self.settings.model_name,
             temperature=0.1,
-            max_output_tokens=8192,
+            max_output_tokens=65536,  # Massimo per Gemini 2.0 Flash
         )
     
     def _rotate_api_key(self) -> bool:
