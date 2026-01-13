@@ -367,5 +367,5 @@ Per domande o supporto, apri una [issue](https://github.com/riccardosecchi/PyTex
 ---
 
 <div align="center">
-  <strong>Fatto con ❤️ per semplificare la lettura di documenti complessi</strong>
+  <strong>Fatto con ❤️ da Riccardo e Claude per semplificare la lettura di documenti complessi</strong>
 </div>
