@@ -93,6 +93,63 @@ NUOVE INFORMAZIONI DA INTEGRARE:
 RIASSUNTO AGGIORNATO E COMPLETO:"""
 )
 
+# =============================================================================
+# STUFF MODE PROMPT - Zero Information Loss (usa context window 1M token)
+# =============================================================================
+
+STUFF_PROMPT = PromptTemplate.from_template(
+    """Sei un professore universitario esperto. Devi creare un RIASSUNTO COMPLETO E ESAUSTIVO di questo documento.
+
+═══════════════════════════════════════════════════════════════════════════════
+⚠️ REGOLE ASSOLUTE - LA VIOLAZIONE DI QUESTE REGOLE È INACCETTABILE
+═══════════════════════════════════════════════════════════════════════════════
+
+1. ZERO OMISSIONI: Ogni singolo concetto, definizione, esempio, riferimento normativo 
+   e informazione presente nel documento DEVE apparire nel riassunto.
+
+2. COMPLETEZZA TOTALE: Il riassunto deve permettere a uno studente di studiare 
+   SENZA MAI dover consultare il documento originale.
+
+3. LUNGHEZZA ILLIMITATA: Il riassunto può essere lungo quanto necessario. 
+   NON esiste limite di lunghezza. Meglio troppo lungo che incompleto.
+
+4. STRUTTURA FEDELE: Mantieni la stessa struttura logica del documento originale
+   (capitoli, sezioni, sottosezioni).
+
+5. ESTRAZIONE LETTERALE: Le definizioni e i riferimenti normativi vanno riportati
+   in modo fedele, non parafrasati.
+
+═══════════════════════════════════════════════════════════════════════════════
+📋 FORMATO OUTPUT
+═══════════════════════════════════════════════════════════════════════════════
+
+Usa questi marcatori per organizzare il contenuto:
+
+📖 DEFINIZIONE: [riporta definizioni testuali]
+⚖️ NORMATIVA: [articoli, leggi, riferimenti normativi]
+🔑 CONCETTO CHIAVE: [concetti fondamentali da memorizzare]
+📌 ESEMPIO: [esempi pratici e casi concreti]
+💡 APPROFONDIMENTO: [dettagli aggiuntivi importanti]
+
+Alla fine di OGNI sezione/capitolo, aggiungi:
+📝 PUNTI CHIAVE SEZIONE: [lista numerata dei concetti essenziali]
+
+Alla fine del documento, aggiungi:
+🎯 SOMMARIO FINALE: [panoramica di tutti i concetti trattati]
+
+═══════════════════════════════════════════════════════════════════════════════
+📄 DOCUMENTO DA RIASSUMERE (riassumi TUTTO, senza omettere NULLA)
+═══════════════════════════════════════════════════════════════════════════════
+
+{text}
+
+═══════════════════════════════════════════════════════════════════════════════
+📝 RIASSUNTO COMPLETO (inizia ora, includi OGNI informazione):
+═══════════════════════════════════════════════════════════════════════════════
+"""
+)
+
+
 LATEX_TEMPLATE = r"""\documentclass[11pt,a4paper]{scrreprt}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
@@ -376,7 +433,7 @@ class LangChainSummarizer:
 
 
     def _refine_summarize(self, chunks: list[Document]) -> str:
-        """Summarization con strategia REFINE."""
+        """Summarization con strategia REFINE (legacy, per documenti enormi)."""
         self.progress("Avvio summarization REFINE...", 25)
 
         if not chunks:
@@ -409,6 +466,41 @@ class LangChainSummarizer:
 
         self.progress("Summarization completata", 80)
         return current_summary
+
+    def _stuff_summarize(self, markdown_text: str) -> str:
+        """
+        Summarization con strategia STUFF - singola chiamata API.
+        
+        Usa il context window da 1M token di Gemini per processare
+        l'intero documento in una sola chiamata, garantendo zero perdite.
+        """
+        # Stima token (approssimativa: ~4 caratteri = 1 token)
+        estimated_tokens = len(markdown_text) // 4
+        
+        self.progress(f"📊 Documento: ~{estimated_tokens:,} token stimati", 25)
+        
+        # Gemini 2.0 Flash ha ~1M token context, lasciamo margine per output
+        MAX_INPUT_TOKENS = 800_000  # 800k per input, lasciamo 200k per output
+        
+        if estimated_tokens > MAX_INPUT_TOKENS:
+            self.progress(f"⚠️ Documento troppo grande ({estimated_tokens:,} token), uso REFINE...", 25)
+            # Fallback a REFINE per documenti enormi
+            chunks = self._split_into_chunks(markdown_text)
+            return self._refine_summarize(chunks)
+        
+        self.progress("🚀 Modalità STUFF: elaborazione documento completo...", 30)
+        self.progress("⏳ Singola chiamata API in corso (può richiedere 1-3 minuti)...", 35)
+        
+        # Singola chiamata con tutto il documento
+        summary = self._call_llm_with_retry(
+            STUFF_PROMPT.format(text=markdown_text)
+        )
+        self.stats.api_calls += 1
+        self.stats.total_chunks = 1  # STUFF = 1 "chunk" logico
+        
+        self.progress("✅ Summarization STUFF completata!", 80)
+        return summary
+
 
     def _convert_to_latex(self, summary: str, title: str) -> str:
         """Converte il riassunto in LaTeX professionale."""
@@ -470,11 +562,11 @@ CONTENUTO LATEX:"""
         # === FASE 1: Estrazione ===
         markdown_text = self._extract_pdf_to_markdown(pdf_path)
 
-        # === FASE 2: Chunking ===
-        chunks = self._split_into_chunks(markdown_text)
-
-        # === FASE 3: Summarization REFINE ===
-        summary = self._refine_summarize(chunks)
+        # === FASE 2: Summarization STUFF (singola chiamata) ===
+        # STUFF mode usa il context window da 1M token per zero perdite
+        # Fallback automatico a REFINE per documenti > 800k token
+        self.progress("📚 Strategia: STUFF (documento completo, zero perdite)", 20)
+        summary = self._stuff_summarize(markdown_text)
 
         # Salva riassunto intermedio (testo)
         summary_txt_path = output_dir / f"{pdf_path.stem}_riassunto.txt"
