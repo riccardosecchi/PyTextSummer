@@ -33,6 +33,8 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -174,7 +176,7 @@ class SettingsDialog(QDialog):
         self.app_settings = app_settings
         
         self.setWindowTitle("⚙️ Impostazioni API")
-        self.setFixedSize(500, 300)
+        self.setFixedSize(550, 380)
         self.setModal(True)
         
         self._setup_ui()
@@ -187,14 +189,16 @@ class SettingsDialog(QDialog):
             }
             QLabel {
                 color: #E8EEF4;
+                min-height: 20px;
             }
             QLineEdit {
                 background-color: #1A2B3C;
                 border: 1px solid #3A4A5A;
                 border-radius: 8px;
-                padding: 10px 14px;
+                padding: 12px 14px;
                 color: #E8EEF4;
-                font-size: 13px;
+                font-size: 14px;
+                min-height: 22px;
             }
             QLineEdit:focus {
                 border: 2px solid #4A90D9;
@@ -204,9 +208,10 @@ class SettingsDialog(QDialog):
                 color: white;
                 border: none;
                 border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 13px;
+                padding: 12px 24px;
+                font-size: 14px;
                 font-weight: bold;
+                min-height: 20px;
             }
             QPushButton:hover {
                 background-color: #5BA0E9;
@@ -219,37 +224,42 @@ class SettingsDialog(QDialog):
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(15)
-        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(16)
+        layout.setContentsMargins(30, 30, 30, 30)
         
         # Title
         title = QLabel("Configurazione Google Gemini API")
-        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setFixedHeight(30)
         layout.addWidget(title)
         
-        layout.addSpacing(10)
+        layout.addSpacing(15)
         
-        # API Key row
+        # API Key section
         api_label = QLabel("🔑 API Key:")
+        api_label.setFont(QFont("Arial", 13))
+        api_label.setFixedHeight(24)
         layout.addWidget(api_label)
         
         api_row = QHBoxLayout()
+        api_row.setSpacing(10)
         self.api_key_input = QLineEdit()
         self.api_key_input.setPlaceholderText("Incolla la tua Google Gemini API Key...")
         self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key_input.setText(self.settings.gemini_api_key)
+        self.api_key_input.setFixedHeight(46)
         api_row.addWidget(self.api_key_input)
         
         self.show_key_btn = QPushButton("👁")
-        self.show_key_btn.setFixedSize(40, 40)
+        self.show_key_btn.setFixedSize(46, 46)
         self.show_key_btn.setCheckable(True)
         self.show_key_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
                 border: 1px solid #3A4A5A;
                 border-radius: 8px;
-                font-size: 16px;
+                font-size: 18px;
             }
             QPushButton:hover { background: #2A3A4A; }
             QPushButton:checked { background: #3A4A5A; }
@@ -258,35 +268,49 @@ class SettingsDialog(QDialog):
         api_row.addWidget(self.show_key_btn)
         layout.addLayout(api_row)
         
-        # Model row
+        layout.addSpacing(10)
+        
+        # Model section
         model_label = QLabel("🤖 Modello (come da documentazione Google):")
+        model_label.setFont(QFont("Arial", 13))
+        model_label.setFixedHeight(24)
         layout.addWidget(model_label)
         
         self.model_input = QLineEdit()
         self.model_input.setPlaceholderText("es. gemini-2.0-flash, gemini-1.5-pro, gemini-2.5-flash...")
         self.model_input.setText(self.settings.model_name)
+        self.model_input.setFixedHeight(46)
         layout.addWidget(self.model_input)
         
         layout.addStretch()
         
-        # Status and buttons
+        # Status label
         self.status_label = QLabel("")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setFixedHeight(24)
+        self.status_label.setFont(QFont("Arial", 12))
         layout.addWidget(self.status_label)
         
+        layout.addSpacing(10)
+        
+        # Buttons row
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(15)
         
         cancel_btn = QPushButton("Annulla")
         cancel_btn.setStyleSheet("background-color: #3A4A5A;")
+        cancel_btn.setFixedHeight(48)
         cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(cancel_btn)
         
         self.connect_btn = QPushButton("🔌 Connetti e Salva")
         self.connect_btn.setStyleSheet("background-color: #47A141;")
+        self.connect_btn.setFixedHeight(48)
         self.connect_btn.clicked.connect(self._test_and_save)
         btn_row.addWidget(self.connect_btn)
         
         layout.addLayout(btn_row)
+
     
     def _toggle_visibility(self, checked):
         if checked:
@@ -448,40 +472,48 @@ class MainWindow(QMainWindow):
         """)
 
     def _setup_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(40, 35, 40, 35)
-        layout.setSpacing(18)
+        # Create scroll area for safe viewport
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self.setCentralWidget(scroll)
+        
+        # Main container inside scroll
+        container = QWidget()
+        scroll.setWidget(container)
+        
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(40, 30, 40, 30)
+        layout.setSpacing(16)
 
-        # Header with settings button
+        # ===== HEADER SECTION (fixed height: ~80px) =====
         header_frame = QFrame()
+        header_frame.setFixedHeight(80)
         header_main = QHBoxLayout(header_frame)
         header_main.setContentsMargins(0, 0, 0, 0)
         
-        # Left spacer for centering
         header_main.addStretch()
         
-        # Center content
         center_widget = QWidget()
         header_layout = QVBoxLayout(center_widget)
-        header_layout.setSpacing(8)
+        header_layout.setSpacing(6)
         header_layout.setContentsMargins(0, 0, 0, 0)
 
         title = QLabel("PyTextSummer")
-        title.setFont(QFont("Arial", 28, QFont.Weight.Bold))
+        title.setFont(QFont("Arial", 26, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("color: #FFFFFF;")
+        title.setFixedHeight(36)
         header_layout.addWidget(title)
 
         subtitle = QLabel("Powered by PyMuPDF4LLM + LangChain REFINE + Gemini")
-        subtitle.setStyleSheet("color: #8AB4F8; font-size: 14px;")
+        subtitle.setStyleSheet("color: #8AB4F8; font-size: 13px;")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setFixedHeight(20)
         header_layout.addWidget(subtitle)
         
         header_main.addWidget(center_widget)
-        
-        # Right side: settings button
         header_main.addStretch()
         
         self.settings_btn = QPushButton("⚙️")
@@ -504,8 +536,9 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(header_frame)
 
-        # Info cards
+        # ===== INFO CARDS SECTION (fixed height: 90px) =====
         info_frame = QFrame()
+        info_frame.setFixedHeight(90)
         info_frame.setStyleSheet("""
             QFrame {
                 background-color: #1A2B3C;
@@ -514,8 +547,8 @@ class MainWindow(QMainWindow):
             }
         """)
         info_layout = QHBoxLayout(info_frame)
-        info_layout.setContentsMargins(20, 16, 20, 16)
-        info_layout.setSpacing(30)
+        info_layout.setContentsMargins(20, 12, 20, 12)
+        info_layout.setSpacing(20)
 
         features = [
             ("🔍", "PyMuPDF4LLM", "Estrazione ottimale"),
@@ -526,47 +559,53 @@ class MainWindow(QMainWindow):
 
         for icon, title_text, desc in features:
             card = QVBoxLayout()
-            card.setSpacing(4)
+            card.setSpacing(2)
 
             icon_lbl = QLabel(icon)
-            icon_lbl.setFont(QFont("Arial", 24))
+            icon_lbl.setFont(QFont("Arial", 20))
             icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_lbl.setFixedHeight(28)
             card.addWidget(icon_lbl)
 
             title_lbl = QLabel(title_text)
-            title_lbl.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+            title_lbl.setFont(QFont("Arial", 10, QFont.Weight.Bold))
             title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             title_lbl.setStyleSheet("color: #FFFFFF;")
+            title_lbl.setFixedHeight(16)
             card.addWidget(title_lbl)
 
             desc_lbl = QLabel(desc)
-            desc_lbl.setStyleSheet("color: #8A9AAA; font-size: 11px;")
+            desc_lbl.setStyleSheet("color: #8A9AAA; font-size: 10px;")
             desc_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            desc_lbl.setFixedHeight(14)
             card.addWidget(desc_lbl)
 
             info_layout.addLayout(card)
 
         layout.addWidget(info_frame)
 
-        # Drop zone
+        # ===== DROP ZONE SECTION (fixed height: 120px) =====
         self.drop_zone = DropZone()
+        self.drop_zone.setFixedHeight(120)
         self.drop_zone.file_dropped.connect(self._set_file)
         layout.addWidget(self.drop_zone)
 
-        # File info
+        # ===== FILE INFO ROW (fixed height: 36px) =====
         file_row = QHBoxLayout()
+        file_row.setContentsMargins(0, 0, 0, 0)
         self.file_label = QLabel("Nessun file selezionato")
         self.file_label.setStyleSheet("color: #6A7A8A; font-size: 13px;")
+        self.file_label.setFixedHeight(30)
         file_row.addWidget(self.file_label)
 
         self.clear_btn = QPushButton("✕")
-        self.clear_btn.setFixedSize(36, 36)
+        self.clear_btn.setFixedSize(30, 30)
         self.clear_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
                 color: #FF6B6B;
-                font-size: 20px;
-                border-radius: 18px;
+                font-size: 18px;
+                border-radius: 15px;
             }
             QPushButton:hover {
                 background: rgba(255, 107, 107, 0.1);
@@ -577,25 +616,36 @@ class MainWindow(QMainWindow):
         file_row.addWidget(self.clear_btn)
         layout.addLayout(file_row)
 
-        # Output destination
+        # ===== OUTPUT DESTINATION SECTION (fixed height: ~70px) =====
+        dest_section = QWidget()
+        dest_section.setFixedHeight(70)
+        dest_layout = QVBoxLayout(dest_section)
+        dest_layout.setContentsMargins(0, 0, 0, 0)
+        dest_layout.setSpacing(8)
+        
         dest_label = QLabel("📁 Cartella di output")
         dest_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        layout.addWidget(dest_label)
+        dest_label.setFixedHeight(20)
+        dest_layout.addWidget(dest_label)
 
         dest_row = QHBoxLayout()
+        dest_row.setSpacing(10)
         self.dest_entry = QLineEdit(str(self.output_dir))
+        self.dest_entry.setFixedHeight(38)
         dest_row.addWidget(self.dest_entry)
 
         browse_btn = QPushButton("Sfoglia")
-        browse_btn.setFixedWidth(100)
+        browse_btn.setFixedSize(100, 38)
         browse_btn.clicked.connect(self._select_output)
         dest_row.addWidget(browse_btn)
-        layout.addLayout(dest_row)
+        dest_layout.addLayout(dest_row)
+        
+        layout.addWidget(dest_section)
 
-        # Process button
+        # ===== PROCESS BUTTON (fixed height: 56px) =====
         self.process_btn = QPushButton("🚀  Genera Riassunto")
-        self.process_btn.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        self.process_btn.setMinimumHeight(60)
+        self.process_btn.setFont(QFont("Arial", 15, QFont.Weight.Bold))
+        self.process_btn.setFixedHeight(56)
         self.process_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
@@ -613,32 +663,56 @@ class MainWindow(QMainWindow):
         self.process_btn.clicked.connect(self._start_processing)
         layout.addWidget(self.process_btn)
 
-        # Progress
+        # ===== PROGRESS SECTION (variable, hidden by default) =====
+        progress_section = QWidget()
+        progress_layout = QVBoxLayout(progress_section)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(6)
+        
         self.progress_bar = QProgressBar()
         self.progress_bar.setFormat("%p%")
+        self.progress_bar.setFixedHeight(20)
         self.progress_bar.hide()
-        layout.addWidget(self.progress_bar)
+        progress_layout.addWidget(self.progress_bar)
 
         self.progress_label = QLabel("")
         self.progress_label.setStyleSheet("color: #8AB4F8; font-size: 12px;")
         self.progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_label.setFixedHeight(18)
         self.progress_label.hide()
-        layout.addWidget(self.progress_label)
+        progress_layout.addWidget(self.progress_label)
+        
+        layout.addWidget(progress_section)
 
-        # Log
+        # ===== LOG SECTION (expands to fill remaining space) =====
+        log_section = QWidget()
+        log_section.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        log_section.setMinimumHeight(140)
+        log_layout = QVBoxLayout(log_section)
+        log_layout.setContentsMargins(0, 0, 0, 0)
+        log_layout.setSpacing(8)
+        
         log_header = QLabel("📋 Log di elaborazione")
         log_header.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        layout.addWidget(log_header)
+        log_header.setFixedHeight(22)
+        log_layout.addWidget(log_header)
 
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setMinimumHeight(160)
-        layout.addWidget(self.log_text)
+        self.log_text.setMinimumHeight(100)
+        log_layout.addWidget(self.log_text)
+        
+        layout.addWidget(log_section)
 
-        # Bottom buttons
-        bottom = QHBoxLayout()
+        # ===== BOTTOM BUTTONS (fixed height: 44px) =====
+        bottom_section = QWidget()
+        bottom_section.setFixedHeight(44)
+        bottom = QHBoxLayout(bottom_section)
+        bottom.setContentsMargins(0, 0, 0, 0)
+        bottom.setSpacing(12)
 
         self.open_btn = QPushButton("📂 Apri Cartella")
+        self.open_btn.setFixedHeight(40)
         self.open_btn.setEnabled(False)
         self.open_btn.clicked.connect(self._open_folder)
         bottom.addWidget(self.open_btn)
@@ -646,6 +720,7 @@ class MainWindow(QMainWindow):
         bottom.addStretch()
 
         overleaf_btn = QPushButton("🌐 Apri Overleaf")
+        overleaf_btn.setFixedHeight(40)
         overleaf_btn.setStyleSheet("""
             QPushButton {
                 background-color: #47A141;
@@ -659,7 +734,8 @@ class MainWindow(QMainWindow):
         )
         bottom.addWidget(overleaf_btn)
 
-        layout.addLayout(bottom)
+        layout.addWidget(bottom_section)
+
 
     def _log(self, msg: str):
         self.log_text.append(msg)
