@@ -1,0 +1,461 @@
+#!/usr/bin/env python3
+"""
+LangChain PDF Summarizer - State of the Art
+============================================
+Implementazione professionale usando:
+- PyMuPDF4LLM per estrazione PDF → Markdown ottimale
+- LangChain con strategia REFINE per summarization iterativa
+- Google Gemini come LLM backend
+
+Basato sulla documentazione ufficiale LangChain.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+import pymupdf4llm
+from langchain_core.documents import Document
+from langchain_core.prompts import PromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_text_splitters import (
+    MarkdownHeaderTextSplitter,
+    RecursiveCharacterTextSplitter,
+)
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+
+class Settings(BaseSettings):
+    """Configurazione da file .env"""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    model_name: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
+
+
+# =============================================================================
+# PROMPTS - Ottimizzati per qualità massima
+# =============================================================================
+
+INITIAL_PROMPT = PromptTemplate.from_template(
+    """Sei un professore universitario esperto che prepara materiale di studio COMPLETO ed ESAUSTIVO.
+
+Analizza il seguente testo e crea un riassunto DETTAGLIATO che permetta di studiare senza leggere l'originale.
+
+REGOLE FONDAMENTALI:
+1. NON omettere NESSUN concetto, definizione, riferimento normativo o esempio
+2. Usa una struttura gerarchica chiara con titoli e sottotitoli
+3. Evidenzia le DEFINIZIONI con "📖 DEFINIZIONE:"
+4. Evidenzia i RIFERIMENTI NORMATIVI con "⚖️ NORMATIVA:"
+5. Evidenzia i CONCETTI CHIAVE con "🔑 CONCETTO:"
+6. Evidenzia gli ESEMPI con "📌 ESEMPIO:"
+7. Alla fine aggiungi "📝 PUNTI MEMORIZZABILI:" con una lista numerata
+
+TESTO DA ANALIZZARE:
+{text}
+
+RIASSUNTO DETTAGLIATO:"""
+)
+
+REFINE_PROMPT = PromptTemplate.from_template(
+    """Sei un professore universitario che sta completando un riassunto di studio.
+
+Hai già creato questo riassunto parziale:
+---
+{existing_answer}
+---
+
+Ora devi INTEGRARE le seguenti nuove informazioni nel riassunto esistente.
+
+REGOLE:
+1. MANTIENI tutto il contenuto esistente
+2. AGGIUNGI le nuove informazioni nella sezione appropriata
+3. Se trovi informazioni correlate a quelle esistenti, COLLEGALE
+4. NON rimuovere MAI contenuto già presente
+5. Usa gli stessi marcatori (📖, ⚖️, 🔑, 📌, 📝)
+6. Aggiorna la sezione "PUNTI MEMORIZZABILI" con nuovi punti
+
+NUOVE INFORMAZIONI DA INTEGRARE:
+{text}
+
+RIASSUNTO AGGIORNATO E COMPLETO:"""
+)
+
+LATEX_TEMPLATE = r"""\documentclass[11pt,a4paper]{scrreprt}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[italian]{babel}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{microtype}
+\usepackage{lmodern}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue!70!black,urlcolor=blue!60!black}
+\usepackage{fancyhdr}
+\usepackage[most]{tcolorbox}
+
+% Box personalizzati
+\newtcolorbox{definition}{
+    colback=green!5!white,
+    colframe=green!60!black,
+    fonttitle=\bfseries,
+    title=Definizione,
+    sharp corners,
+    boxrule=0.8pt
+}
+
+\newtcolorbox{lawbox}{
+    colback=orange!5!white,
+    colframe=orange!70!black,
+    fonttitle=\bfseries,
+    title=Riferimento Normativo,
+    sharp corners,
+    boxrule=0.8pt
+}
+
+\newtcolorbox{concept}{
+    colback=blue!5!white,
+    colframe=blue!75!black,
+    fonttitle=\bfseries,
+    title=Concetto Chiave,
+    sharp corners,
+    boxrule=0.8pt
+}
+
+\newtcolorbox{example}{
+    colback=gray!5!white,
+    colframe=gray!60!black,
+    fonttitle=\bfseries,
+    title=Esempio,
+    sharp corners,
+    boxrule=0.8pt
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\leftmark}
+\fancyhead[R]{\thepage}
+
+\begin{document}
+
+\title{%TITLE%}
+\author{Riassunto Completo per lo Studio}
+\date{\today}
+\maketitle
+
+\tableofcontents
+\newpage
+
+%CONTENT%
+
+\end{document}
+"""
+
+
+# =============================================================================
+# DATA STRUCTURES
+# =============================================================================
+
+
+@dataclass
+class ProcessingStats:
+    """Statistiche di elaborazione"""
+
+    total_pages: int = 0
+    total_chunks: int = 0
+    total_characters_input: int = 0
+    total_characters_output: int = 0
+    processing_time_seconds: float = 0
+    api_calls: int = 0
+
+
+# =============================================================================
+# LANGCHAIN SUMMARIZER
+# =============================================================================
+
+
+class LangChainSummarizer:
+    """
+    Summarizer professionale usando LangChain.
+
+    Pipeline:
+    1. PyMuPDF4LLM estrae PDF → Markdown (preserva struttura)
+    2. MarkdownHeaderTextSplitter divide per sezioni logiche
+    3. RecursiveCharacterTextSplitter per chunk di dimensione gestibile
+    4. Strategia REFINE per summarization iterativa
+    5. Conversione finale in LaTeX
+    """
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        progress_callback: Callable[[str, int], None] | None = None,
+    ):
+        self.settings = settings or Settings()
+        self.progress = progress_callback or (lambda m, p: print(f"[{p}%] {m}"))
+        self.stats = ProcessingStats()
+
+        # Inizializza LLM
+        os.environ["GOOGLE_API_KEY"] = self.settings.gemini_api_key
+
+        self.llm = ChatGoogleGenerativeAI(
+            model=self.settings.model_name,
+            temperature=0.1,
+            max_output_tokens=8192,
+        )
+
+    def _extract_pdf_to_markdown(self, pdf_path: Path) -> str:
+        """Estrae PDF in Markdown usando PyMuPDF4LLM."""
+        self.progress("Estrazione PDF → Markdown (PyMuPDF4LLM)...", 5)
+
+        md_text = pymupdf4llm.to_markdown(
+            str(pdf_path),
+            page_chunks=False,
+            write_images=False,
+            show_progress=False,
+        )
+
+        self.stats.total_characters_input = len(md_text)
+        self.progress(f"Estratti {len(md_text):,} caratteri", 10)
+
+        return md_text
+
+    def _split_into_chunks(self, markdown_text: str) -> list[Document]:
+        """Divide il testo in chunk intelligenti."""
+        self.progress("Divisione in chunk semantici...", 15)
+
+        # Livello 1: Split per header Markdown
+        headers_to_split = [
+            ("#", "Header 1"),
+            ("##", "Header 2"),
+            ("###", "Header 3"),
+        ]
+
+        markdown_splitter = MarkdownHeaderTextSplitter(
+            headers_to_split_on=headers_to_split,
+            strip_headers=False,
+        )
+
+        md_chunks = markdown_splitter.split_text(markdown_text)
+
+        # Livello 2: Split chunk troppo grandi
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=8000,
+            chunk_overlap=500,
+            length_function=len,
+            separators=["\n\n", "\n", ". ", " ", ""],
+        )
+
+        final_chunks = []
+        for chunk in md_chunks:
+            if len(chunk.page_content) > 8000:
+                sub_chunks = text_splitter.split_documents([chunk])
+                final_chunks.extend(sub_chunks)
+            else:
+                final_chunks.append(chunk)
+
+        # Se non ci sono chunk, usa split diretto
+        if not final_chunks:
+            final_chunks = text_splitter.create_documents([markdown_text])
+
+        self.stats.total_chunks = len(final_chunks)
+        self.progress(f"Creati {len(final_chunks)} chunk", 20)
+
+        return final_chunks
+
+    def _call_llm_with_retry(self, prompt: str, max_retries: int = 5) -> str:
+        """Chiamata LLM con retry robusto."""
+        for attempt in range(max_retries):
+            try:
+                response = self.llm.invoke(prompt)
+                return response.content
+            except Exception as e:
+                err = str(e).lower()
+                if "429" in str(e) or "quota" in err or "rate" in err:
+                    wait = min(30 * (2 ** attempt), 300)
+                    self.progress(f"Rate limit - attendo {wait}s...", -1)
+                    time.sleep(wait)
+                elif attempt == max_retries - 1:
+                    raise
+                else:
+                    time.sleep(5)
+        return ""
+
+    def _refine_summarize(self, chunks: list[Document]) -> str:
+        """Summarization con strategia REFINE."""
+        self.progress("Avvio summarization REFINE...", 25)
+
+        if not chunks:
+            return "Nessun contenuto da elaborare."
+
+        # Primo chunk: genera riassunto iniziale
+        self.progress(f"Elaborazione chunk 1/{len(chunks)}...", 30)
+
+        current_summary = self._call_llm_with_retry(
+            INITIAL_PROMPT.format(text=chunks[0].page_content)
+        )
+        self.stats.api_calls += 1
+
+        # Refine con i chunk successivi
+        for i, chunk in enumerate(chunks[1:], start=2):
+            progress_pct = 30 + int((i / len(chunks)) * 50)
+            self.progress(f"Raffinamento chunk {i}/{len(chunks)}...", progress_pct)
+
+            refined = self._call_llm_with_retry(
+                REFINE_PROMPT.format(
+                    existing_answer=current_summary,
+                    text=chunk.page_content
+                )
+            )
+            current_summary = refined
+            self.stats.api_calls += 1
+
+            # Pausa per rate limit
+            time.sleep(1)
+
+        self.progress("Summarization completata", 80)
+        return current_summary
+
+    def _convert_to_latex(self, summary: str, title: str) -> str:
+        """Converte il riassunto in LaTeX professionale."""
+        self.progress("Conversione in LaTeX...", 85)
+
+        conversion_prompt = f"""Converti questo riassunto in contenuto LaTeX.
+
+IMPORTANTE:
+- Converti "📖 DEFINIZIONE:" in \\begin{{definition}}...\\end{{definition}}
+- Converti "⚖️ NORMATIVA:" in \\begin{{lawbox}}...\\end{{lawbox}}
+- Converti "🔑 CONCETTO:" in \\begin{{concept}}...\\end{{concept}}
+- Converti "📌 ESEMPIO:" in \\begin{{example}}...\\end{{example}}
+- Usa \\chapter{{}} per i titoli principali
+- Usa \\section{{}} e \\subsection{{}} per i sottotitoli
+- Converti le liste in \\begin{{itemize}} o \\begin{{enumerate}}
+
+Restituisci SOLO il contenuto LaTeX (senza preambolo).
+
+RIASSUNTO:
+{summary}
+
+CONTENUTO LATEX:"""
+
+        latex_content = self._call_llm_with_retry(conversion_prompt)
+        self.stats.api_calls += 1
+
+        # Pulisci eventuali artefatti
+        latex_content = latex_content.strip()
+        if latex_content.startswith("```"):
+            lines = latex_content.split("\n")
+            latex_content = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+
+        # Costruisci documento completo
+        full_latex = LATEX_TEMPLATE.replace("%TITLE%", title).replace(
+            "%CONTENT%", latex_content
+        )
+
+        self.stats.total_characters_output = len(full_latex)
+        return full_latex
+
+    def process(self, pdf_path: Path, output_dir: Path) -> tuple[str, dict]:
+        """Pipeline completa di elaborazione."""
+        import time as time_module
+
+        start_time = time_module.time()
+
+        pdf_path = Path(pdf_path)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Conta pagine
+        import fitz
+
+        with fitz.open(pdf_path) as doc:
+            self.stats.total_pages = len(doc)
+
+        self.progress(f"Elaborazione: {pdf_path.name} ({self.stats.total_pages} pagine)", 0)
+
+        # === FASE 1: Estrazione ===
+        markdown_text = self._extract_pdf_to_markdown(pdf_path)
+
+        # === FASE 2: Chunking ===
+        chunks = self._split_into_chunks(markdown_text)
+
+        # === FASE 3: Summarization REFINE ===
+        summary = self._refine_summarize(chunks)
+
+        # Salva riassunto intermedio (testo)
+        summary_txt_path = output_dir / f"{pdf_path.stem}_riassunto.txt"
+        summary_txt_path.write_text(summary, encoding="utf-8")
+
+        # === FASE 4: Conversione LaTeX ===
+        title = pdf_path.stem.replace("_", " ").replace("-", " ").title()
+        latex_content = self._convert_to_latex(summary, title)
+
+        # Salva LaTeX
+        latex_path = output_dir / f"{pdf_path.stem}_riassunto_latex.txt"
+        latex_path.write_text(latex_content, encoding="utf-8")
+
+        # Calcola tempo
+        self.stats.processing_time_seconds = time_module.time() - start_time
+
+        # Salva statistiche
+        stats_dict = {
+            "total_pages": self.stats.total_pages,
+            "total_chunks": self.stats.total_chunks,
+            "total_characters_input": self.stats.total_characters_input,
+            "total_characters_output": self.stats.total_characters_output,
+            "processing_time_seconds": round(self.stats.processing_time_seconds, 2),
+            "api_calls": self.stats.api_calls,
+            "output_files": {
+                "summary_txt": str(summary_txt_path),
+                "latex_txt": str(latex_path),
+            },
+        }
+
+        stats_path = output_dir / f"{pdf_path.stem}_stats.json"
+        stats_path.write_text(json.dumps(stats_dict, indent=2), encoding="utf-8")
+
+        self.progress("Completato!", 100)
+
+        return str(latex_path), stats_dict
+
+
+# =============================================================================
+# CLI
+# =============================================================================
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Usage: python langchain_summarizer.py <pdf_file> [output_dir]")
+        sys.exit(1)
+
+    pdf = Path(sys.argv[1])
+    out_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else pdf.parent / "output"
+
+    summarizer = LangChainSummarizer()
+    output_path, stats = summarizer.process(pdf, out_dir)
+
+    print(f"\n{'=' * 60}")
+    print("✅ ELABORAZIONE COMPLETATA")
+    print(f"{'=' * 60}")
+    print(f"📁 Output: {output_path}")
+    print(f"📄 Pagine elaborate: {stats['total_pages']}")
+    print(f"🧩 Chunk processati: {stats['total_chunks']}")
+    print(f"🌐 Chiamate API: {stats['api_calls']}")
+    print(f"⏱️  Tempo: {stats['processing_time_seconds']}s")
