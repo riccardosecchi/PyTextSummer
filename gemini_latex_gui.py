@@ -325,6 +325,10 @@ class SettingsDialog(QDialog):
     
     def _add_api_key_row(self, initial_value=""):
         """Add a new API key input row."""
+        # Fix: clicked signal passes bool, convert to empty string
+        if not isinstance(initial_value, str):
+            initial_value = ""
+        
         if len(self.api_key_rows) >= self.MAX_API_KEYS:
             self.status_label.setText(f"❌ Massimo {self.MAX_API_KEYS} API Key consentite")
             self.status_label.setStyleSheet("color: #FF6B6B;")
