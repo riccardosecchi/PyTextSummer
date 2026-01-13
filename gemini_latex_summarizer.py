@@ -84,7 +84,7 @@ Analizza il documento fornito e genera un riassunto esaustivo in codice LaTeX pu
 1. **Completezza**: NON omettere dettagli tecnici rilevanti. Ogni concetto chiave deve essere presente.
 2. **Struttura gerarchica**: Organizza logicamente in \chapter{}, \section{}, \subsection{}.
 3. **LaTeX avanzato**: Usa tcolorbox per definizioni/teoremi, booktabs per tabelle, enumitem per liste.
-4. **Zero errori**: Il codice DEVE compilare immediatamente senza warning.
+4. **Zero errori**: Il codice DEVE compilare immediatamente senza warning e senza errori.
 5. **Output puro**: Restituisci SOLO codice LaTeX, nessun commento esterno o markdown.
 
 ## STRUTTURA DOCUMENTO OBBLIGATORIA

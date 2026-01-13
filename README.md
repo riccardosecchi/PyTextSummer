@@ -12,13 +12,15 @@ PyTextSummer è un'applicazione desktop professionale che trasforma documenti PD
 
 ## ✨ Caratteristiche
 
-- 🤖 **AI-Powered**: Utilizza Google Gemini 2.0 Flash per riassunti di qualità superiore
-- 📄 **LangChain REFINE**: Strategia iterativa che preserva il contesto completo
+- 🤖 **AI-Powered**: Utilizza Google Gemini 2.5 Flash per riassunti di qualità superiore
+- 🎯 **STUFF Mode**: Elabora l'intero documento in una singola chiamata (context 1M token)
+- 📖 **Zero Perdite**: Prompt "blindato" che garantisce completezza totale del riassunto
+- 🔑 **Multi-API Key**: Supporta fino a 10 API Key con rotazione automatica anti-rate-limit
 - 🎨 **Interfaccia Moderna**: GUI scura e intuitiva con PyQt6
-- 📝 **Output LaTeX**: Genera file `.txt` pronti per Overleaf
+- 📝 **Output LaTeX**: Genera file pronti per Overleaf con box colorati per definizioni, normative, esempi
 - 🔍 **Estrazione Ottimale**: PyMuPDF4LLM per conversione PDF → Markdown
-- 🚀 **Multi-Strategia**: Scegli tra approccio Smart (locale+API) o LangChain puro
-- 📊 **Statistiche Dettagliate**: Monitora pagine, chunk e chiamate API
+- 📊 **Statistiche Dettagliate**: Monitora pagine, token stimati e chiamate API
+
 
 ---
 
