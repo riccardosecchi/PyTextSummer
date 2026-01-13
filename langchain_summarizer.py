@@ -543,6 +543,92 @@ CONTENUTO LATEX:"""
         self.stats.total_characters_output = len(full_latex)
         return full_latex
 
+    def compile_latex_to_pdf(self, latex_content: str, output_dir: Path, filename: str, max_fix_attempts: int = 3) -> tuple[bool, str]:
+        """
+        Compila LaTeX in PDF usando pdflatex.
+        Se ci sono errori, usa l'AI per correggerli e riprova.
+        
+        Returns:
+            (success: bool, pdf_path_or_error: str)
+        """
+        import subprocess
+        import shutil
+        import tempfile
+        
+        # Verifica che pdflatex sia installato
+        pdflatex_path = shutil.which("pdflatex")
+        if not pdflatex_path:
+            return False, "❌ pdflatex non trovato. Installa MacTeX: https://tug.org/mactex/"
+        
+        self.progress("📄 Compilazione LaTeX → PDF...", 90)
+        
+        current_latex = latex_content
+        
+        for attempt in range(max_fix_attempts):
+            # Crea directory temporanea per la compilazione
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_tex = Path(temp_dir) / f"{filename}.tex"
+                temp_tex.write_text(current_latex, encoding="utf-8")
+                
+                try:
+                    # Esegui pdflatex (2 volte per indice e riferimenti)
+                    for pass_num in range(2):
+                        result = subprocess.run(
+                            [pdflatex_path, "-interaction=nonstopmode", "-halt-on-error", temp_tex.name],
+                            cwd=temp_dir,
+                            capture_output=True,
+                            text=True,
+                            timeout=120
+                        )
+                    
+                    # Controlla se il PDF è stato creato
+                    temp_pdf = Path(temp_dir) / f"{filename}.pdf"
+                    if temp_pdf.exists():
+                        # Successo! Copia il PDF nella directory di output
+                        final_pdf = output_dir / f"{filename}.pdf"
+                        shutil.copy(temp_pdf, final_pdf)
+                        self.progress("✅ PDF compilato con successo!", 95)
+                        return True, str(final_pdf)
+                    
+                    # Estrai errori dal log
+                    log_file = Path(temp_dir) / f"{filename}.log"
+                    error_log = log_file.read_text(encoding="utf-8", errors="ignore") if log_file.exists() else result.stdout + result.stderr
+                    
+                except subprocess.TimeoutExpired:
+                    error_log = "Timeout: la compilazione ha impiegato troppo tempo."
+                except Exception as e:
+                    error_log = str(e)
+            
+            # Se siamo qui, c'è stato un errore
+            if attempt < max_fix_attempts - 1:
+                self.progress(f"⚠️ Errore compilazione (tentativo {attempt + 1}/{max_fix_attempts}). Correzione AI...", -1)
+                
+                # Usa l'AI per correggere gli errori
+                fix_prompt = f"""Il seguente codice LaTeX ha errori di compilazione. Correggili e restituisci SOLO il codice LaTeX corretto completo.
+
+ERRORI DI COMPILAZIONE:
+{error_log[-3000:]}
+
+CODICE LATEX CON ERRORI:
+{current_latex}
+
+CODICE LATEX CORRETTO (solo codice, nessun commento):"""
+                
+                current_latex = self._call_llm_with_retry(fix_prompt)
+                self.stats.api_calls += 1
+                
+                # Pulisci eventuali markdown
+                if current_latex.startswith("```"):
+                    lines = current_latex.split("\n")
+                    current_latex = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+            else:
+                # Ultimo tentativo fallito
+                self.progress("❌ Impossibile correggere gli errori LaTeX", -1)
+                return False, f"Errori di compilazione dopo {max_fix_attempts} tentativi:\n{error_log[-1000:]}"
+        
+        return False, "Errore sconosciuto nella compilazione"
+
+
     def process(self, pdf_path: Path, output_dir: Path) -> tuple[str, dict]:
         """Pipeline completa di elaborazione."""
         import time as time_module

@@ -22,6 +22,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QFont
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -56,12 +57,13 @@ class ProcessingThread(QThread):
     finished_ok = pyqtSignal(str, dict)
     finished_error = pyqtSignal(str)
 
-    def __init__(self, input_file: Path, output_dir: Path, settings: Settings, api_keys: list[str] | None = None):
+    def __init__(self, input_file: Path, output_dir: Path, settings: Settings, api_keys: list[str] | None = None, create_pdf: bool = False):
         super().__init__()
         self.input_file = input_file
         self.output_dir = output_dir
         self.settings = settings
         self.api_keys = api_keys or []
+        self.create_pdf = create_pdf
 
     def run(self):
         try:
@@ -75,6 +77,28 @@ class ProcessingThread(QThread):
             )
 
             output_path, stats = summarizer.process(self.input_file, self.output_dir)
+            
+            # Se richiesto, compila il LaTeX in PDF
+            if self.create_pdf:
+                latex_path = stats.get("output_files", {}).get("latex_txt")
+                if latex_path:
+                    from pathlib import Path as P
+                    latex_content = P(latex_path).read_text(encoding="utf-8")
+                    filename = self.input_file.stem + "_riassunto"
+                    
+                    success, result = summarizer.compile_latex_to_pdf(
+                        latex_content, 
+                        self.output_dir, 
+                        filename
+                    )
+                    
+                    if success:
+                        stats["output_files"]["pdf"] = result
+                        output_path = result  # Il PDF diventa l'output principale
+                    else:
+                        # Compilation failed, add error to stats
+                        stats["pdf_error"] = result
+            
             self.finished_ok.emit(output_path, stats)
 
         except Exception as e:
@@ -799,6 +823,37 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(dest_section)
 
+        # ===== CREA PDF CHECKBOX (fixed height: 30px) =====
+        pdf_row = QHBoxLayout()
+        pdf_row.setContentsMargins(0, 0, 0, 0)
+        
+        self.create_pdf_checkbox = QCheckBox("📄 Crea PDF (compila LaTeX automaticamente)")
+        self.create_pdf_checkbox.setStyleSheet("""
+            QCheckBox {
+                color: #E8EEF4;
+                font-size: 13px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+            }
+            QCheckBox::indicator:unchecked {
+                border: 2px solid #4A5A6A;
+                border-radius: 4px;
+                background: transparent;
+            }
+            QCheckBox::indicator:checked {
+                border: 2px solid #4A90D9;
+                border-radius: 4px;
+                background: #4A90D9;
+            }
+        """)
+        self.create_pdf_checkbox.setToolTip("Richiede pdflatex installato (MacTeX). Corregge automaticamente errori di compilazione.")
+        pdf_row.addWidget(self.create_pdf_checkbox)
+        pdf_row.addStretch()
+        layout.addLayout(pdf_row)
+
+
         # ===== PROCESS BUTTON (fixed height: 56px) =====
         self.process_btn = QPushButton("🚀  Genera Riassunto")
         self.process_btn.setFont(QFont("Arial", 15, QFont.Weight.Bold))
@@ -969,7 +1024,8 @@ class MainWindow(QMainWindow):
             self.input_file,
             self.output_dir,
             self.settings,
-            api_keys=self.api_keys
+            api_keys=self.api_keys,
+            create_pdf=self.create_pdf_checkbox.isChecked()
         )
         self.worker.progress.connect(self._on_progress)
         self.worker.finished_ok.connect(self._on_success)
