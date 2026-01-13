@@ -35,12 +35,10 @@ PyTextSummer è un'applicazione desktop professionale che trasforma documenti PD
 2. **Apri** `PyTextSummer.dmg`
 3. **Trascina** l'icona di PyTextSummer nella cartella **Applicazioni**
 4. **Avvia** l'app dal Launchpad o dalla cartella Applicazioni
-5. **Configura l'API Key**:
-   - Al primo avvio, crea un file `.env` nella tua home directory:
-   ```bash
-   echo "GEMINI_API_KEY=la_tua_chiave_qui" > ~/.env
-   ```
-   - Oppure crea il file manualmente: `~/. env` con il contenuto `GEMINI_API_KEY=la_tua_chiave`
+5. **Configura l'API Key direttamente nell'app**:
+   - Nella sezione **⚙️ Impostazioni API**, incolla la tua API Key
+   - Scegli il modello (es. `gemini-2.0-flash`, `gemini-1.5-pro`)
+   - Clicca **🔌 Connetti API** per verificare e salvare
    - Ottieni la chiave da [Google AI Studio](https://aistudio.google.com/apikey)
 
 > **Nota per macOS**: Al primo avvio potrebbe apparire un avviso di sicurezza. Vai su **Sistema > Privacy e Sicurezza** e autorizza l'app.
