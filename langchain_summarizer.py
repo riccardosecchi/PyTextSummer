@@ -555,12 +555,24 @@ CONTENUTO LATEX:"""
         import shutil
         import tempfile
         
-        # Verifica che pdflatex sia installato
+        # Cerca compilatore LaTeX: pdflatex o tectonic
         pdflatex_path = shutil.which("pdflatex")
-        if not pdflatex_path:
-            return False, "❌ pdflatex non trovato. Installa MacTeX: https://tug.org/mactex/"
+        tectonic_path = shutil.which("tectonic")
         
-        self.progress("📄 Compilazione LaTeX → PDF...", 90)
+        if pdflatex_path:
+            compiler = pdflatex_path
+            compiler_name = "pdflatex"
+            compiler_args = ["-interaction=nonstopmode", "-halt-on-error"]
+            needs_double_pass = True
+        elif tectonic_path:
+            compiler = tectonic_path
+            compiler_name = "tectonic"
+            compiler_args = ["--keep-logs"]  # Tectonic fa tutto in un passaggio
+            needs_double_pass = False
+        else:
+            return False, "❌ Nessun compilatore LaTeX trovato. Installa:\n• brew install tectonic (consigliato, ~200MB)\n• brew install --cask mactex (completo, ~4GB)"
+        
+        self.progress(f"📄 Compilazione LaTeX → PDF ({compiler_name})...", 90)
         
         current_latex = latex_content
         
@@ -571,14 +583,15 @@ CONTENUTO LATEX:"""
                 temp_tex.write_text(current_latex, encoding="utf-8")
                 
                 try:
-                    # Esegui pdflatex (2 volte per indice e riferimenti)
-                    for pass_num in range(2):
+                    # Esegui compilatore
+                    passes = 2 if needs_double_pass else 1
+                    for pass_num in range(passes):
                         result = subprocess.run(
-                            [pdflatex_path, "-interaction=nonstopmode", "-halt-on-error", temp_tex.name],
+                            [compiler] + compiler_args + [temp_tex.name],
                             cwd=temp_dir,
                             capture_output=True,
                             text=True,
-                            timeout=120
+                            timeout=180  # Tectonic può scaricare pacchetti
                         )
                     
                     # Controlla se il PDF è stato creato
