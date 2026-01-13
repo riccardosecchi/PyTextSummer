@@ -321,27 +321,56 @@ class LangChainSummarizer:
     def _call_llm_with_retry(self, prompt: str, max_retries: int = 5) -> str:
         """Chiamata LLM con retry robusto e rotazione API key."""
         for attempt in range(max_retries):
+            current_key_num = self.current_key_index + 1
             try:
                 response = self.llm.invoke(prompt)
                 return response.content
             except Exception as e:
-                err = str(e).lower()
-                if "429" in str(e) or "quota" in err or "rate" in err:
-                    # Mark current key as rate limited
+                err_str = str(e)
+                err_lower = err_str.lower()
+                
+                # Extract HTTP status code if present
+                status_code = "N/A"
+                if "429" in err_str:
+                    status_code = "429"
+                elif "403" in err_str:
+                    status_code = "403"
+                elif "400" in err_str:
+                    status_code = "400"
+                elif "500" in err_str:
+                    status_code = "500"
+                elif "503" in err_str:
+                    status_code = "503"
+                
+                # Detailed error logging
+                self.progress(f"⚠️ API #{current_key_num} errore [{status_code}]: {err_str[:80]}...", -1)
+                
+                # Check if it's a rate limit error
+                is_rate_limit = (
+                    "429" in err_str or 
+                    "quota" in err_lower or 
+                    "rate" in err_lower or
+                    "resource_exhausted" in err_lower
+                )
+                
+                if is_rate_limit:
+                    self.progress(f"🔒 API #{current_key_num} in rate limit (cooldown 60s)", -1)
                     self._mark_key_rate_limited(cooldown_seconds=60)
                     
                     # Try to rotate to another key
                     if self._rotate_api_key():
-                        # Rotation successful, retry immediately with new key
+                        self.progress(f"✅ Passato a API #{self.current_key_index + 1}", -1)
                         continue
                     else:
                         # All keys rate limited, wait
                         wait = min(30 * (2 ** attempt), 300)
-                        self.progress(f"⏳ Rate limit su tutte le API - attendo {wait}s...", -1)
+                        self.progress(f"⏳ Tutte le {len(self.api_keys)} API in cooldown - attendo {wait}s...", -1)
                         time.sleep(wait)
                 elif attempt == max_retries - 1:
+                    self.progress(f"❌ Errore fatale dopo {max_retries} tentativi", -1)
                     raise
                 else:
+                    self.progress(f"🔄 Retry {attempt + 1}/{max_retries} tra 5s...", -1)
                     time.sleep(5)
         return ""
 
