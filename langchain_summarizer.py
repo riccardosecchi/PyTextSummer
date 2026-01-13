@@ -199,25 +199,65 @@ class LangChainSummarizer:
     3. RecursiveCharacterTextSplitter per chunk di dimensione gestibile
     4. Strategia REFINE per summarization iterativa
     5. Conversione finale in LaTeX
+    
+    Supporta rotazione multi-API key per evitare rate limiting.
     """
 
     def __init__(
         self,
         settings: Settings | None = None,
         progress_callback: Callable[[str, int], None] | None = None,
+        api_keys: list[str] | None = None,
     ):
         self.settings = settings or Settings()
         self.progress = progress_callback or (lambda m, p: print(f"[{p}%] {m}"))
         self.stats = ProcessingStats()
+        
+        # Multi-API key support
+        self.api_keys = api_keys or []
+        if not self.api_keys and self.settings.gemini_api_key:
+            self.api_keys = [self.settings.gemini_api_key]
+        
+        self.current_key_index = 0
+        self.key_cooldowns = {}  # key_index -> cooldown_end_time
+        
+        # Initialize LLM with first key
+        self._init_llm(self.api_keys[0] if self.api_keys else "")
 
-        # Inizializza LLM
-        os.environ["GOOGLE_API_KEY"] = self.settings.gemini_api_key
-
+    def _init_llm(self, api_key: str):
+        """Initialize or reinitialize LLM with given API key."""
+        os.environ["GOOGLE_API_KEY"] = api_key
         self.llm = ChatGoogleGenerativeAI(
             model=self.settings.model_name,
             temperature=0.1,
             max_output_tokens=8192,
         )
+    
+    def _rotate_api_key(self) -> bool:
+        """Rotate to next available API key. Returns True if successful."""
+        if len(self.api_keys) <= 1:
+            return False
+        
+        current_time = time.time()
+        start_index = self.current_key_index
+        
+        for _ in range(len(self.api_keys)):
+            self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+            
+            # Check if this key is still in cooldown
+            cooldown_end = self.key_cooldowns.get(self.current_key_index, 0)
+            if current_time >= cooldown_end:
+                # Key available, switch to it
+                self._init_llm(self.api_keys[self.current_key_index])
+                self.progress(f"🔄 Rotazione API Key #{self.current_key_index + 1}", -1)
+                return True
+        
+        return False  # All keys are in cooldown
+    
+    def _mark_key_rate_limited(self, cooldown_seconds: int = 60):
+        """Mark current key as rate limited with cooldown."""
+        self.key_cooldowns[self.current_key_index] = time.time() + cooldown_seconds
+
 
     def _extract_pdf_to_markdown(self, pdf_path: Path) -> str:
         """Estrae PDF in Markdown usando PyMuPDF4LLM."""
@@ -279,7 +319,7 @@ class LangChainSummarizer:
         return final_chunks
 
     def _call_llm_with_retry(self, prompt: str, max_retries: int = 5) -> str:
-        """Chiamata LLM con retry robusto."""
+        """Chiamata LLM con retry robusto e rotazione API key."""
         for attempt in range(max_retries):
             try:
                 response = self.llm.invoke(prompt)
@@ -287,14 +327,24 @@ class LangChainSummarizer:
             except Exception as e:
                 err = str(e).lower()
                 if "429" in str(e) or "quota" in err or "rate" in err:
-                    wait = min(30 * (2 ** attempt), 300)
-                    self.progress(f"Rate limit - attendo {wait}s...", -1)
-                    time.sleep(wait)
+                    # Mark current key as rate limited
+                    self._mark_key_rate_limited(cooldown_seconds=60)
+                    
+                    # Try to rotate to another key
+                    if self._rotate_api_key():
+                        # Rotation successful, retry immediately with new key
+                        continue
+                    else:
+                        # All keys rate limited, wait
+                        wait = min(30 * (2 ** attempt), 300)
+                        self.progress(f"⏳ Rate limit su tutte le API - attendo {wait}s...", -1)
+                        time.sleep(wait)
                 elif attempt == max_retries - 1:
                     raise
                 else:
                     time.sleep(5)
         return ""
+
 
     def _refine_summarize(self, chunks: list[Document]) -> str:
         """Summarization con strategia REFINE."""

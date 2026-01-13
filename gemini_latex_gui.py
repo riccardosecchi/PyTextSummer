@@ -56,11 +56,12 @@ class ProcessingThread(QThread):
     finished_ok = pyqtSignal(str, dict)
     finished_error = pyqtSignal(str)
 
-    def __init__(self, input_file: Path, output_dir: Path, settings: Settings):
+    def __init__(self, input_file: Path, output_dir: Path, settings: Settings, api_keys: list[str] | None = None):
         super().__init__()
         self.input_file = input_file
         self.output_dir = output_dir
         self.settings = settings
+        self.api_keys = api_keys or []
 
     def run(self):
         try:
@@ -69,7 +70,8 @@ class ProcessingThread(QThread):
 
             summarizer = LangChainSummarizer(
                 settings=self.settings,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                api_keys=self.api_keys
             )
 
             output_path, stats = summarizer.process(self.input_file, self.output_dir)
@@ -78,6 +80,7 @@ class ProcessingThread(QThread):
         except Exception as e:
             import traceback
             self.finished_error.emit(f"{str(e)}\n\n{traceback.format_exc()}")
+
 
 
 # =============================================================================
@@ -168,19 +171,24 @@ class DropZone(QFrame):
 
 
 class SettingsDialog(QDialog):
-    """Dialog per configurazione API."""
+    """Dialog per configurazione API con supporto multi-chiave."""
+    
+    MAX_API_KEYS = 10
     
     def __init__(self, parent, settings, app_settings):
         super().__init__(parent)
         self.settings = settings
         self.app_settings = app_settings
+        self.api_key_rows = []  # List of (widget, input, status_label, remove_btn)
         
         self.setWindowTitle("⚙️ Impostazioni API")
-        self.setFixedSize(550, 380)
+        self.setMinimumSize(600, 500)
+        self.setMaximumSize(700, 700)
         self.setModal(True)
         
         self._setup_ui()
         self._apply_theme()
+        self._load_existing_keys()
     
     def _apply_theme(self):
         self.setStyleSheet("""
@@ -189,16 +197,14 @@ class SettingsDialog(QDialog):
             }
             QLabel {
                 color: #E8EEF4;
-                min-height: 20px;
             }
             QLineEdit {
                 background-color: #1A2B3C;
                 border: 1px solid #3A4A5A;
-                border-radius: 8px;
-                padding: 12px 14px;
+                border-radius: 6px;
+                padding: 8px 12px;
                 color: #E8EEF4;
-                font-size: 14px;
-                min-height: 22px;
+                font-size: 13px;
             }
             QLineEdit:focus {
                 border: 2px solid #4A90D9;
@@ -207,11 +213,10 @@ class SettingsDialog(QDialog):
                 background-color: #4A90D9;
                 color: white;
                 border: none;
-                border-radius: 8px;
-                padding: 12px 24px;
-                font-size: 14px;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
                 font-weight: bold;
-                min-height: 20px;
             }
             QPushButton:hover {
                 background-color: #5BA0E9;
@@ -220,154 +225,288 @@ class SettingsDialog(QDialog):
                 background-color: #2A3A4A;
                 color: #6A7A8A;
             }
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
         """)
     
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(12)
+        layout.setContentsMargins(25, 20, 25, 20)
         
         # Title
         title = QLabel("Configurazione Google Gemini API")
-        title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setFixedHeight(30)
         layout.addWidget(title)
         
-        layout.addSpacing(15)
+        # Info label
+        info = QLabel("💡 Aggiungi fino a 10 API Key per evitare rate limiting. Le chiavi verranno usate a rotazione.")
+        info.setStyleSheet("color: #8AB4F8; font-size: 11px;")
+        info.setWordWrap(True)
+        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(info)
         
-        # API Key section
-        api_label = QLabel("🔑 API Key:")
-        api_label.setFont(QFont("Arial", 13))
-        api_label.setFixedHeight(24)
-        layout.addWidget(api_label)
+        layout.addSpacing(8)
         
-        api_row = QHBoxLayout()
-        api_row.setSpacing(10)
-        self.api_key_input = QLineEdit()
-        self.api_key_input.setPlaceholderText("Incolla la tua Google Gemini API Key...")
-        self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.api_key_input.setText(self.settings.gemini_api_key)
-        self.api_key_input.setFixedHeight(46)
-        api_row.addWidget(self.api_key_input)
+        # API Keys section header
+        keys_header = QHBoxLayout()
+        keys_label = QLabel("🔑 API Keys:")
+        keys_label.setFont(QFont("Arial", 13, QFont.Weight.Bold))
+        keys_header.addWidget(keys_label)
+        keys_header.addStretch()
         
-        self.show_key_btn = QPushButton("👁")
-        self.show_key_btn.setFixedSize(46, 46)
-        self.show_key_btn.setCheckable(True)
-        self.show_key_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: 1px solid #3A4A5A;
-                border-radius: 8px;
-                font-size: 18px;
-            }
-            QPushButton:hover { background: #2A3A4A; }
-            QPushButton:checked { background: #3A4A5A; }
-        """)
-        self.show_key_btn.toggled.connect(self._toggle_visibility)
-        api_row.addWidget(self.show_key_btn)
-        layout.addLayout(api_row)
+        self.add_key_btn = QPushButton("+ Aggiungi API")
+        self.add_key_btn.setStyleSheet("background-color: #2A5A8A; padding: 6px 12px;")
+        self.add_key_btn.clicked.connect(self._add_api_key_row)
+        keys_header.addWidget(self.add_key_btn)
+        layout.addLayout(keys_header)
         
-        layout.addSpacing(10)
+        # Scrollable area for API keys
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFixedHeight(200)
+        scroll.setStyleSheet("QScrollArea { background: #0D1B2A; border-radius: 8px; }")
+        
+        self.keys_container = QWidget()
+        self.keys_layout = QVBoxLayout(self.keys_container)
+        self.keys_layout.setSpacing(8)
+        self.keys_layout.setContentsMargins(10, 10, 10, 10)
+        self.keys_layout.addStretch()
+        
+        scroll.setWidget(self.keys_container)
+        layout.addWidget(scroll)
+        
+        layout.addSpacing(8)
         
         # Model section
-        model_label = QLabel("🤖 Modello (come da documentazione Google):")
+        model_row = QHBoxLayout()
+        model_label = QLabel("🤖 Modello:")
         model_label.setFont(QFont("Arial", 13))
-        model_label.setFixedHeight(24)
-        layout.addWidget(model_label)
+        model_label.setFixedWidth(80)
+        model_row.addWidget(model_label)
         
         self.model_input = QLineEdit()
-        self.model_input.setPlaceholderText("es. gemini-2.0-flash, gemini-1.5-pro, gemini-2.5-flash...")
+        self.model_input.setPlaceholderText("es. gemini-2.0-flash, gemini-1.5-pro...")
         self.model_input.setText(self.settings.model_name)
-        self.model_input.setFixedHeight(46)
-        layout.addWidget(self.model_input)
+        self.model_input.setFixedHeight(40)
+        model_row.addWidget(self.model_input)
+        layout.addLayout(model_row)
         
         layout.addStretch()
         
         # Status label
         self.status_label = QLabel("")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setFixedHeight(24)
         self.status_label.setFont(QFont("Arial", 12))
+        self.status_label.setWordWrap(True)
+        self.status_label.setMinimumHeight(24)
         layout.addWidget(self.status_label)
-        
-        layout.addSpacing(10)
         
         # Buttons row
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(15)
+        btn_row.setSpacing(12)
         
         cancel_btn = QPushButton("Annulla")
         cancel_btn.setStyleSheet("background-color: #3A4A5A;")
-        cancel_btn.setFixedHeight(48)
+        cancel_btn.setFixedHeight(44)
         cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(cancel_btn)
         
-        self.connect_btn = QPushButton("🔌 Connetti e Salva")
+        self.connect_btn = QPushButton("🔌 Testa e Salva Tutte")
         self.connect_btn.setStyleSheet("background-color: #47A141;")
-        self.connect_btn.setFixedHeight(48)
-        self.connect_btn.clicked.connect(self._test_and_save)
+        self.connect_btn.setFixedHeight(44)
+        self.connect_btn.clicked.connect(self._test_and_save_all)
         btn_row.addWidget(self.connect_btn)
         
         layout.addLayout(btn_row)
-
     
-    def _toggle_visibility(self, checked):
-        if checked:
-            self.api_key_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.show_key_btn.setText("🔒")
-        else:
-            self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.show_key_btn.setText("👁")
+    def _add_api_key_row(self, initial_value=""):
+        """Add a new API key input row."""
+        if len(self.api_key_rows) >= self.MAX_API_KEYS:
+            self.status_label.setText(f"❌ Massimo {self.MAX_API_KEYS} API Key consentite")
+            self.status_label.setStyleSheet("color: #FF6B6B;")
+            return
+        
+        row_num = len(self.api_key_rows) + 1
+        
+        row_widget = QWidget()
+        row_widget.setStyleSheet("background: #1A2B3C; border-radius: 6px;")
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(8, 6, 8, 6)
+        row_layout.setSpacing(8)
+        
+        # Key number label
+        num_label = QLabel(f"#{row_num}")
+        num_label.setFixedWidth(28)
+        num_label.setStyleSheet("color: #6A7A8A; font-weight: bold;")
+        row_layout.addWidget(num_label)
+        
+        # Input field
+        key_input = QLineEdit()
+        key_input.setPlaceholderText(f"API Key {row_num}...")
+        key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        key_input.setText(initial_value)
+        key_input.setFixedHeight(36)
+        row_layout.addWidget(key_input)
+        
+        # Status indicator
+        status_lbl = QLabel("⏳")
+        status_lbl.setFixedWidth(24)
+        status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row_layout.addWidget(status_lbl)
+        
+        # Remove button
+        remove_btn = QPushButton("✕")
+        remove_btn.setFixedSize(32, 32)
+        remove_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #FF6B6B;
+                font-size: 16px;
+                border-radius: 16px;
+            }
+            QPushButton:hover {
+                background: rgba(255, 107, 107, 0.2);
+            }
+        """)
+        remove_btn.clicked.connect(lambda: self._remove_api_key_row(row_widget))
+        row_layout.addWidget(remove_btn)
+        
+        # Store reference
+        self.api_key_rows.append((row_widget, key_input, status_lbl, num_label))
+        
+        # Insert before the stretch
+        self.keys_layout.insertWidget(self.keys_layout.count() - 1, row_widget)
+        
+        self._update_row_numbers()
+        self._update_add_button()
     
-    def _test_and_save(self):
-        api_key = self.api_key_input.text().strip()
+    def _remove_api_key_row(self, row_widget):
+        """Remove an API key row."""
+        for i, (widget, _, _, _) in enumerate(self.api_key_rows):
+            if widget == row_widget:
+                self.api_key_rows.pop(i)
+                widget.deleteLater()
+                break
+        
+        self._update_row_numbers()
+        self._update_add_button()
+    
+    def _update_row_numbers(self):
+        """Update the row numbers after add/remove."""
+        for i, (_, _, _, num_label) in enumerate(self.api_key_rows):
+            num_label.setText(f"#{i + 1}")
+    
+    def _update_add_button(self):
+        """Enable/disable add button based on count."""
+        count = len(self.api_key_rows)
+        self.add_key_btn.setEnabled(count < self.MAX_API_KEYS)
+        self.add_key_btn.setText(f"+ Aggiungi API ({count}/{self.MAX_API_KEYS})")
+    
+    def _load_existing_keys(self):
+        """Load existing API keys from settings."""
+        # Try to load multiple keys first (new format)
+        keys_json = self.app_settings.value("api_keys", "")
+        if keys_json:
+            try:
+                import json
+                keys = json.loads(keys_json)
+                for key in keys:
+                    if key.strip():
+                        self._add_api_key_row(key)
+            except:
+                pass
+        
+        # Fallback: load single key (old format)
+        if not self.api_key_rows:
+            single_key = self.app_settings.value("api_key", "")
+            if single_key:
+                self._add_api_key_row(single_key)
+        
+        # Always have at least one row
+        if not self.api_key_rows:
+            self._add_api_key_row()
+        
+        self._update_add_button()
+    
+    def _test_and_save_all(self):
+        """Test all API keys and save working ones."""
         model = self.model_input.text().strip() or "gemini-2.0-flash"
         
-        if not api_key:
-            self.status_label.setText("❌ API Key richiesta")
+        # Collect all non-empty keys
+        keys_to_test = []
+        for widget, key_input, status_lbl, _ in self.api_key_rows:
+            key = key_input.text().strip()
+            if key:
+                keys_to_test.append((key, status_lbl))
+                status_lbl.setText("🔄")
+        
+        if not keys_to_test:
+            self.status_label.setText("❌ Inserisci almeno una API Key")
             self.status_label.setStyleSheet("color: #FF6B6B;")
             return
         
         self.connect_btn.setEnabled(False)
-        self.connect_btn.setText("⏳ Test...")
-        self.status_label.setText("🔄 Verifica connessione...")
+        self.connect_btn.setText("⏳ Test in corso...")
+        self.status_label.setText(f"🔄 Verifica {len(keys_to_test)} API Key...")
         self.status_label.setStyleSheet("color: #8AB4F8;")
         QApplication.processEvents()
         
-        try:
-            genai.configure(api_key=api_key)
-            test_model = genai.GenerativeModel(model)
-            response = test_model.generate_content(
-                "OK",
-                generation_config=genai.GenerationConfig(max_output_tokens=5, temperature=0)
-            )
+        valid_keys = []
+        failed_count = 0
+        
+        for i, (key, status_lbl) in enumerate(keys_to_test):
+            self.status_label.setText(f"🔄 Test API Key {i + 1}/{len(keys_to_test)}...")
+            QApplication.processEvents()
             
-            if response and response.text:
-                self.app_settings.setValue("api_key", api_key)
-                self.app_settings.setValue("model", model)
-                self.settings.gemini_api_key = api_key
-                self.settings.model_name = model
-                self.status_label.setText(f"✅ Connesso! Modello: {model}")
-                self.status_label.setStyleSheet("color: #7DCE82;")
-                # Close dialog after short delay
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(800, self.accept)
-            else:
-                raise Exception("Risposta vuota")
+            try:
+                genai.configure(api_key=key)
+                test_model = genai.GenerativeModel(model)
+                response = test_model.generate_content(
+                    "OK",
+                    generation_config=genai.GenerationConfig(max_output_tokens=5, temperature=0)
+                )
                 
-        except Exception as e:
-            err = str(e)
-            if "API_KEY_INVALID" in err or "INVALID" in err.upper():
-                self.status_label.setText("❌ API Key non valida")
-            elif "NOT_FOUND" in err or "not found" in err.lower():
-                self.status_label.setText(f"❌ Modello '{model}' non trovato")
+                if response and response.text:
+                    status_lbl.setText("✅")
+                    valid_keys.append(key)
+                else:
+                    raise Exception("Empty response")
+                    
+            except Exception as e:
+                status_lbl.setText("❌")
+                failed_count += 1
+        
+        # Save results
+        if valid_keys:
+            import json
+            self.app_settings.setValue("api_keys", json.dumps(valid_keys))
+            self.app_settings.setValue("model", model)
+            # Also save first key for backward compatibility
+            self.app_settings.setValue("api_key", valid_keys[0])
+            self.settings.gemini_api_key = valid_keys[0]
+            self.settings.model_name = model
+            
+            if failed_count > 0:
+                self.status_label.setText(f"⚠️ {len(valid_keys)} OK, {failed_count} non valide")
+                self.status_label.setStyleSheet("color: #FFA500;")
             else:
-                self.status_label.setText(f"❌ Errore: {err[:40]}")
+                self.status_label.setText(f"✅ Tutte le {len(valid_keys)} API Key funzionanti!")
+                self.status_label.setStyleSheet("color: #7DCE82;")
+            
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(1200, self.accept)
+        else:
+            self.status_label.setText(f"❌ Tutte le {failed_count} API Key non valide")
             self.status_label.setStyleSheet("color: #FF6B6B;")
-        finally:
-            self.connect_btn.setEnabled(True)
-            self.connect_btn.setText("🔌 Connetti e Salva")
+        
+        self.connect_btn.setEnabled(True)
+        self.connect_btn.setText("🔌 Testa e Salva Tutte")
+
+
 
 
 # =============================================================================
@@ -394,13 +533,27 @@ class MainWindow(QMainWindow):
     
     def _load_saved_settings(self):
         """Load saved API key and model from QSettings."""
+        # Load multiple keys (new format)
+        self.api_keys = []
+        keys_json = self.app_settings.value("api_keys", "")
+        if keys_json:
+            try:
+                import json
+                self.api_keys = json.loads(keys_json)
+            except:
+                pass
+        
+        # Fallback to single key
         saved_key = self.app_settings.value("api_key", "")
         saved_model = self.app_settings.value("model", "gemini-2.0-flash")
         
         if saved_key:
             self.settings.gemini_api_key = saved_key
+            if not self.api_keys:
+                self.api_keys = [saved_key]
         if saved_model:
             self.settings.model_name = saved_model
+
 
     def _apply_theme(self):
         self.setStyleSheet("""
@@ -801,12 +954,18 @@ class MainWindow(QMainWindow):
 
         self._log("🚀 Avvio pipeline LangChain...\n")
         self._log("📚 Strategia: REFINE (iterativa, preserva contesto)")
-        self._log("🔍 Estrazione: PyMuPDF4LLM (PDF → Markdown)\n")
+        self._log("🔍 Estrazione: PyMuPDF4LLM (PDF → Markdown)")
+        if len(self.api_keys) > 1:
+            self._log(f"🔑 API Keys configurate: {len(self.api_keys)} (rotazione automatica)\n")
+        else:
+            self._log("")
+
 
         self.worker = ProcessingThread(
             self.input_file,
             self.output_dir,
-            self.settings
+            self.settings,
+            api_keys=self.api_keys
         )
         self.worker.progress.connect(self._on_progress)
         self.worker.finished_ok.connect(self._on_success)
