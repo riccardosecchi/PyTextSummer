@@ -18,12 +18,13 @@ import sys
 from pathlib import Path
 
 import fitz
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -37,6 +38,7 @@ from PyQt6.QtWidgets import (
 )
 
 from langchain_summarizer import LangChainSummarizer, Settings
+import google.generativeai as genai
 
 
 # =============================================================================
@@ -169,11 +171,25 @@ class MainWindow(QMainWindow):
         self.input_file: Path | None = None
         self.output_dir = Path.home() / "Desktop"
         self.worker = None
+        
+        # App settings storage
+        self.app_settings = QSettings("PyTextSummer", "PyTextSummer")
+        self._load_saved_settings()
 
-        self.setWindowTitle("LangChain PDF Summarizer")
-        self.setMinimumSize(900, 850)
+        self.setWindowTitle("PyTextSummer - PDF Summarizer")
+        self.setMinimumSize(900, 950)
         self._setup_ui()
         self._apply_theme()
+    
+    def _load_saved_settings(self):
+        """Load saved API key and model from QSettings."""
+        saved_key = self.app_settings.value("api_key", "")
+        saved_model = self.app_settings.value("model", "gemini-2.0-flash")
+        
+        if saved_key:
+            self.settings.gemini_api_key = saved_key
+        if saved_model:
+            self.settings.model_name = saved_model
 
     def _apply_theme(self):
         self.setStyleSheet("""
@@ -256,7 +272,7 @@ class MainWindow(QMainWindow):
         header_layout = QVBoxLayout(header_frame)
         header_layout.setSpacing(8)
 
-        title = QLabel("LangChain PDF Summarizer")
+        title = QLabel("PyTextSummer")
         title.setFont(QFont("Arial", 28, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet("color: #FFFFFF;")
@@ -268,6 +284,110 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(subtitle)
 
         layout.addWidget(header_frame)
+
+        # =====================================================================
+        # SETTINGS SECTION
+        # =====================================================================
+        settings_group = QGroupBox("⚙️ Impostazioni API")
+        settings_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 14px;
+                font-weight: bold;
+                color: #FFFFFF;
+                border: 1px solid #3A4A5A;
+                border-radius: 10px;
+                margin-top: 12px;
+                padding-top: 20px;
+                background-color: #1A2B3C;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 8px;
+            }
+        """)
+        
+        settings_layout = QVBoxLayout(settings_group)
+        settings_layout.setSpacing(12)
+        settings_layout.setContentsMargins(15, 25, 15, 15)
+        
+        # API Key row
+        api_row = QHBoxLayout()
+        api_label = QLabel("🔑 API Key:")
+        api_label.setFixedWidth(100)
+        api_label.setStyleSheet("color: #E8EEF4; font-weight: normal;")
+        api_row.addWidget(api_label)
+        
+        self.api_key_input = QLineEdit()
+        self.api_key_input.setPlaceholderText("Incolla la tua Google Gemini API Key...")
+        self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_key_input.setText(self.settings.gemini_api_key)
+        api_row.addWidget(self.api_key_input)
+        
+        # Show/hide API key button
+        self.show_key_btn = QPushButton("👁")
+        self.show_key_btn.setFixedSize(36, 36)
+        self.show_key_btn.setCheckable(True)
+        self.show_key_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid #3A4A5A;
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background: #2A3A4A;
+            }
+            QPushButton:checked {
+                background: #3A4A5A;
+            }
+        """)
+        self.show_key_btn.toggled.connect(self._toggle_api_key_visibility)
+        api_row.addWidget(self.show_key_btn)
+        
+        settings_layout.addLayout(api_row)
+        
+        # Model row
+        model_row = QHBoxLayout()
+        model_label = QLabel("🤖 Modello:")
+        model_label.setFixedWidth(100)
+        model_label.setStyleSheet("color: #E8EEF4; font-weight: normal;")
+        model_row.addWidget(model_label)
+        
+        self.model_input = QLineEdit()
+        self.model_input.setPlaceholderText("es. gemini-2.0-flash, gemini-1.5-pro...")
+        self.model_input.setText(self.settings.model_name)
+        self.model_input.setToolTip("Inserisci il nome del modello come da documentazione Google AI")
+        model_row.addWidget(self.model_input)
+        
+        settings_layout.addLayout(model_row)
+        
+        # Connect button row
+        connect_row = QHBoxLayout()
+        connect_row.addStretch()
+        
+        self.connection_status = QLabel("")
+        self.connection_status.setStyleSheet("font-size: 12px;")
+        connect_row.addWidget(self.connection_status)
+        
+        self.connect_btn = QPushButton("🔌 Connetti API")
+        self.connect_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #47A141;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background-color: #57B151;
+            }
+            QPushButton:disabled {
+                background-color: #2A5A2A;
+            }
+        """)
+        self.connect_btn.clicked.connect(self._test_and_save_api)
+        connect_row.addWidget(self.connect_btn)
+        
+        settings_layout.addLayout(connect_row)
+        
+        layout.addWidget(settings_group)
 
         # Info cards
         info_frame = QFrame()
@@ -557,6 +677,86 @@ class MainWindow(QMainWindow):
             subprocess.run(["explorer", str(self.output_dir)])
         else:
             subprocess.run(["xdg-open", str(self.output_dir)])
+    
+    def _toggle_api_key_visibility(self, checked: bool):
+        """Toggle visibility of API key field."""
+        if checked:
+            self.api_key_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.show_key_btn.setText("🔒")
+        else:
+            self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.show_key_btn.setText("👁")
+    
+    def _test_and_save_api(self):
+        """Test API connection and save settings if successful."""
+        api_key = self.api_key_input.text().strip()
+        model = self.model_input.text().strip()
+        
+        if not api_key:
+            self.connection_status.setText("❌ API Key richiesta")
+            self.connection_status.setStyleSheet("color: #FF6B6B; font-size: 12px;")
+            return
+        
+        if not model:
+            model = "gemini-2.0-flash"
+            self.model_input.setText(model)
+        
+        # Disable button during test
+        self.connect_btn.setEnabled(False)
+        self.connect_btn.setText("⏳ Test in corso...")
+        self.connection_status.setText("🔄 Verifica connessione...")
+        self.connection_status.setStyleSheet("color: #8AB4F8; font-size: 12px;")
+        
+        # Force UI update
+        QApplication.processEvents()
+        
+        try:
+            # Configure genai with the API key
+            genai.configure(api_key=api_key)
+            
+            # Try to get the model to verify access
+            test_model = genai.GenerativeModel(model)
+            
+            # Make a simple test request
+            response = test_model.generate_content(
+                "Rispondi solo con 'OK' se funziona.",
+                generation_config=genai.GenerationConfig(
+                    max_output_tokens=10,
+                    temperature=0
+                )
+            )
+            
+            # If we get here, the API works!
+            if response and response.text:
+                # Save settings
+                self.app_settings.setValue("api_key", api_key)
+                self.app_settings.setValue("model", model)
+                self.settings.gemini_api_key = api_key
+                self.settings.model_name = model
+                
+                self.connection_status.setText(f"✅ Connesso! Modello: {model}")
+                self.connection_status.setStyleSheet("color: #7DCE82; font-size: 12px;")
+                self._log(f"✅ API configurata correttamente - Modello: {model}")
+            else:
+                raise Exception("Risposta vuota dal modello")
+                
+        except Exception as e:
+            error_msg = str(e)
+            if "API_KEY_INVALID" in error_msg or "INVALID_ARGUMENT" in error_msg:
+                self.connection_status.setText("❌ API Key non valida")
+            elif "NOT_FOUND" in error_msg or "not found" in error_msg.lower():
+                self.connection_status.setText(f"❌ Modello '{model}' non trovato")
+            elif "quota" in error_msg.lower() or "rate" in error_msg.lower():
+                self.connection_status.setText("⚠️ Limite quota raggiunto")
+            else:
+                self.connection_status.setText(f"❌ Errore: {error_msg[:50]}")
+            
+            self.connection_status.setStyleSheet("color: #FF6B6B; font-size: 12px;")
+            self._log(f"❌ Errore connessione API: {error_msg}")
+        
+        finally:
+            self.connect_btn.setEnabled(True)
+            self.connect_btn.setText("🔌 Connetti API")
 
 
 # =============================================================================
