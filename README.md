@@ -34,11 +34,56 @@ L'interfaccia pulita e moderna ti permette di:
 
 ## 📦 Installazione
 
-### Prerequisiti
+### 🚀 Installazione Rapida (macOS - Consigliata)
+
+**Scarica l'app già pronta senza bisogno di Python!**
+
+1. **Scarica il file `.dmg`** dall'ultima [Release](https://github.com/riccardosecchi/PyTextSummer/releases/latest)
+2. **Apri** `PyTextSummer.dmg`
+3. **Trascina** l'icona di PyTextSummer nella cartella **Applicazioni**
+4. **Avvia** l'app dal Launchpad o dalla cartella Applicazioni
+5. **Configura l'API Key**:
+   - Al primo avvio, crea un file `.env` nella tua home directory:
+   ```bash
+   echo "GEMINI_API_KEY=la_tua_chiave_qui" > ~/.env
+   ```
+   - Oppure crea il file manualmente: `~/. env` con il contenuto `GEMINI_API_KEY=la_tua_chiave`
+   - Ottieni la chiave da [Google AI Studio](https://aistudio.google.com/apikey)
+
+> **Nota per macOS**: Al primo avvio potrebbe apparire un avviso di sicurezza. Vai su **Sistema > Privacy e Sicurezza** e autorizza l'app.
+
+---
+
+### 🛠️ Installazione da Sorgente (per sviluppatori)
+
+#### Prerequisiti
 
 - Python 3.10 o superiore
 - pip (package installer per Python)
 - Google Gemini API Key ([ottieni qui](https://aistudio.google.com/apikey))
+
+#### Build della tua versione .dmg
+
+Se vuoi compilare il file .dmg da solo:
+
+```bash
+# 1. Clona la repository
+git clone https://github.com/riccardosecchi/PyTextSummer.git
+cd PyTextSummer
+
+# 2. Crea e attiva ambiente virtuale
+python3 -m venv venv
+source venv/bin/activate
+
+# 3. Installa le dipendenze
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# 4. Esegui lo script di build
+python build.py
+
+# Il file PyTextSummer.dmg sarà creato nella directory del progetto
+```
 
 ### 🍎 macOS
 
@@ -104,7 +149,19 @@ cp .env.example .env
 
 ## 🚀 Come Avviare l'App
 
-### Con Ambiente Virtuale (venv) - Metodo Consigliato
+### App Standalone (.dmg) - Consigliata
+
+Se hai installato l'app dal file `.dmg`:
+
+1. **Apri PyTextSummer** dal Launchpad o dalla cartella Applicazioni
+2. **Prima volta**: potrebbe richiedere autorizzazione in **Sistema > Privacy e Sicurezza**
+3. **Inizia ad usare l'app** - l'interfaccia è intuitiva: trascina un PDF e clicca Genera!
+
+> **Ricorda**: La tua API Key deve essere configurata in `~/.env` (vedi sezione Installazione)
+
+---
+
+### Da Sorgente (Ambiente Virtuale)
 
 #### macOS / Linux
 
