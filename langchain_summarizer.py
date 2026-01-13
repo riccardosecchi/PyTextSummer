@@ -379,12 +379,20 @@ class LangChainSummarizer:
 
     def _call_llm_with_retry(self, prompt: str, max_retries: int = 5) -> str:
         """Chiamata LLM con retry robusto e rotazione API key."""
-        for attempt in range(max_retries):
+        total_attempts = 0
+        max_total_attempts = max_retries * len(self.api_keys) if self.api_keys else max_retries
+        
+        while total_attempts < max_total_attempts:
             current_key_num = self.current_key_index + 1
+            current_key = self.api_keys[self.current_key_index] if self.api_keys else "N/A"
+            
+            self.progress(f"🔑 Usando API #{current_key_num} (key: ...{current_key[-8:] if len(current_key) > 8 else current_key})", -1)
+            
             try:
                 response = self.llm.invoke(prompt)
                 return response.content
             except Exception as e:
+                total_attempts += 1
                 err_str = str(e)
                 err_lower = err_str.lower()
                 
@@ -418,19 +426,27 @@ class LangChainSummarizer:
                     
                     # Try to rotate to another key
                     if self._rotate_api_key():
-                        self.progress(f"✅ Passato a API #{self.current_key_index + 1}", -1)
-                        continue
+                        self.progress(f"✅ Rotazione riuscita → API #{self.current_key_index + 1}", -1)
+                        continue  # Riprova subito con nuova chiave
                     else:
-                        # All keys rate limited, wait
-                        wait = min(30 * (2 ** attempt), 300)
+                        # All keys rate limited, wait and reset cooldowns
+                        wait = 30
                         self.progress(f"⏳ Tutte le {len(self.api_keys)} API in cooldown - attendo {wait}s...", -1)
                         time.sleep(wait)
-                elif attempt == max_retries - 1:
-                    self.progress(f"❌ Errore fatale dopo {max_retries} tentativi", -1)
+                        # Reset all cooldowns after waiting
+                        self.key_cooldowns.clear()
+                        self.progress(f"🔄 Cooldown resettato, riprovo...", -1)
+                        continue  # Riprova dopo l'attesa
+                        
+                elif total_attempts >= max_total_attempts:
+                    self.progress(f"❌ Errore fatale dopo {total_attempts} tentativi", -1)
                     raise
                 else:
-                    self.progress(f"🔄 Retry {attempt + 1}/{max_retries} tra 5s...", -1)
+                    self.progress(f"🔄 Retry {total_attempts}/{max_total_attempts} tra 5s...", -1)
                     time.sleep(5)
+                    continue
+        
+        self.progress("❌ Numero massimo di tentativi raggiunto", -1)
         return ""
 
 
