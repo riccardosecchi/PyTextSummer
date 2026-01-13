@@ -44,7 +44,7 @@ L'interfaccia pulita e moderna ti permette di:
 
 ```bash
 # 1. Clona la repository
-git clone https://github.com/tuousername/PyTextSummer.git
+git clone https://github.com/riccardosecchi/PyTextSummer.git
 cd PyTextSummer
 
 # 2. Crea e attiva ambiente virtuale
@@ -64,7 +64,7 @@ cp .env.example .env
 
 ```powershell
 # 1. Clona la repository
-git clone https://github.com/tuousername/PyTextSummer.git
+git clone https://github.com/riccardosecchi/PyTextSummer.git
 cd PyTextSummer
 
 # 2. Crea e attiva ambiente virtuale
@@ -84,7 +84,7 @@ copy .env.example .env
 
 ```bash
 # 1. Clona la repository
-git clone https://github.com/tuousername/PyTextSummer.git
+git clone https://github.com/riccardosecchi/PyTextSummer.git
 cd PyTextSummer
 
 # 2. Crea e attiva ambiente virtuale
@@ -295,18 +295,6 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ---
 
-## 🤝 Contribuire
-
-Contributi, issues e richieste di funzionalità sono benvenuti!
-
-1. Fork del progetto
-2. Crea un branch (`git checkout -b feature/AmazingFeature`)
-3. Commit delle modifiche (`git commit -m 'Add some AmazingFeature'`)
-4. Push al branch (`git push origin feature/AmazingFeature`)
-5. Apri una Pull Request
-
----
-
 ## 📄 Licenza
 
 Distribuito sotto licenza MIT. Vedi `LICENSE` per maggiori informazioni.
@@ -315,7 +303,7 @@ Distribuito sotto licenza MIT. Vedi `LICENSE` per maggiori informazioni.
 
 ## 📧 Contatti
 
-Per domande o supporto, apri una [issue](https://github.com/tuousername/PyTextSummer/issues) su GitHub.
+Per domande o supporto, apri una [issue](https://github.com/riccardosecchi/PyTextSummer/issues) su GitHub.
 
 ---
 
